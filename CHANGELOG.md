@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `server_move_id`/`client_move_id` and `server_change_id`/`client_change_id` for the second
   parts of transfers and currency exchanges). Returns the list of `{server_id, client_id,
   status}` maps the server echoes back. `TransactionType` enums are auto-normalised to int.
+* `api.delete_object(object_id=..., object_type=...)` — wraps the `deleteObject` SOAP method.
+  `object_type` is a `Literal[...]` of the eight WSDL-allowed kinds (``waste``, ``income``,
+  ``move``, ``change``, ``object``, ``currency``, ``tag``, ``accum``). Returns `True` on
+  success, raises `DrebedengiAPIError` on the "other object connected" failure mode so the
+  caller can clean dependants up.
+* `DeletableObjectType` — exported `Literal` alias for the eight valid `object_type` values.
 * `utils.generate_xml_map_array` — companion to `generate_xml_array`, but for arrays whose
   elements are already typed values (typically pre-built `ns2:Map`s from
   `zeep.helpers.create_xml_soap_map`).
