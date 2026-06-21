@@ -10,6 +10,8 @@ from zeep.transports import Transport
 from .model import (
     Account,
     ChangeRecord,
+    Check,
+    CheckToRecord,
     Currency,
     ExpenseCategory,
     IncomeSource,
@@ -578,6 +580,96 @@ class DrebedengiAPI:
         items: List[etree.Element] = root.findall(".//getPlaceListReturn/item")
 
         return [xmlmap_to_model(item, Account, strict=self.strict) for item in items]
+
+    def get_check_list(
+        self,
+        *,
+        id_list: List[int] | None = None,
+    ) -> List[Check]:
+        """
+        Implements getCheckList API — retrieve QR-check (receipt) records.
+
+        Only QR-submitted checks are synced via this endpoint.
+
+        Args:
+            id_list: Optional list of check IDs to retrieve.  If ``None``, all checks are
+                returned (same semantics as other ``get_*`` methods).
+
+        Returns:
+            List of :class:`~drebedengi.model.Check` objects.
+
+        Original WSDL description:
+            Gets list of checks; Only QR checks is synced; Return array of arrays: [id] =>
+            Internal check ID; [ext] => qr-url; [state] => the state of qr check process;
+            [qr_sum] => the sum of check from QR; [qr_date] => the date of check from QR; If
+            parameter [idList] is given, it will be treat as ID list of objects to retrieve# this
+            is used for synchronization;
+        """
+
+        logger.debug(f"Getting check list with the following params: {id_list=}")
+
+        if id_list is not None:
+            id_list_xml = generate_xml_array(id_list)
+        else:
+            id_list_xml = zeep.xsd.SkipValue  # type: ignore
+
+        with self.client.settings(raw_response=True, strict=False):
+            result = self.client.service.getCheckList(
+                self.api_key,
+                self.login,
+                self.password,
+                idList=id_list_xml,
+            )
+            DrebedengiAPIError.check_and_raise(result)
+
+        root = etree.fromstring(result.content)
+        items: List[etree.Element] = root.findall(".//getCheckListReturn/item")
+
+        return [xmlmap_to_model(item, Check, strict=self.strict) for item in items]
+
+    def get_check_to_record_list(
+        self,
+        *,
+        id_list: List[int] | None = None,
+    ) -> List[CheckToRecord]:
+        """
+        Implements getCheckToRecordList API — retrieve links between QR-checks and transaction
+        records.
+
+        Args:
+            id_list: Optional list of link IDs to retrieve.  If ``None``, all links are returned.
+
+        Returns:
+            List of :class:`~drebedengi.model.CheckToRecord` objects, each carrying
+            ``check_id`` and ``record_id``.
+
+        Original WSDL description:
+            Gets list of check to record link; Only for QR checks; Return array of arrays: [id]
+            => Internal link ID; [check_id] => ID of the check; [record_id] => ID of the record;
+            If parameter [idList] is given, it will be treat as ID list of objects to retrieve#
+            this is used for synchronization;
+        """
+
+        logger.debug(f"Getting check-to-record list with the following params: {id_list=}")
+
+        if id_list is not None:
+            id_list_xml = generate_xml_array(id_list)
+        else:
+            id_list_xml = zeep.xsd.SkipValue  # type: ignore
+
+        with self.client.settings(raw_response=True, strict=False):
+            result = self.client.service.getCheckToRecordList(
+                self.api_key,
+                self.login,
+                self.password,
+                idList=id_list_xml,
+            )
+            DrebedengiAPIError.check_and_raise(result)
+
+        root = etree.fromstring(result.content)
+        items: List[etree.Element] = root.findall(".//getCheckToRecordListReturn/item")
+
+        return [xmlmap_to_model(item, CheckToRecord, strict=self.strict) for item in items]
 
     def get_current_revision(self) -> int:
         """

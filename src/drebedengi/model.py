@@ -345,3 +345,37 @@ class Account:
         converter=optional(int), metadata={"xml": {"name": "purse_of_nuid"}}, default=None
     )
     icon_id: str | None = field(default=None)
+
+
+@define
+class Check:
+    """Drebedengi QR-check (receipt) model.
+
+    Attributes:
+        id (int): Internal check ID.
+        ext (str): QR URL / raw QR string submitted to the server.
+        state (str): Processing state of the QR check (server-assigned text value).
+        qr_sum (int | None): Sum from the QR code in hundredths (kopecks). May be absent.
+        qr_date (str | None): Date from the QR code (``YYYY-MM-DD HH:MM:SS``). May be absent.
+    """
+
+    id: int = field(converter=int)
+    ext: str = field(converter=str)
+    state: str = field(converter=str)
+    qr_sum: int | None = field(converter=optional(int), default=None)
+    qr_date: str | None = field(converter=optional(str), default=None)
+
+
+@define
+class CheckToRecord:
+    """Drebedengi link between a QR-check and a transaction record.
+
+    Attributes:
+        id (int): Internal link ID.
+        check_id (int): ID of the associated :class:`Check`.
+        record_id (int): ID of the associated transaction (record).
+    """
+
+    id: int = field(converter=int)
+    check_id: int = field(converter=int)
+    record_id: int = field(converter=int)
