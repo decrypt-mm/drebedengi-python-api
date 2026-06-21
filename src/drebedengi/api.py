@@ -695,3 +695,116 @@ class DrebedengiAPI:
         root = etree.fromstring(result.content)
 
         return int(root.findtext(".//getCurrentRevisionReturn"))
+
+    def parse_text_data(
+        self,
+        texts: List[str],
+        *,
+        default_place_from_id: str = "0",
+        default_cat_id: str = "0",
+        default_src_id: str = "0",
+        default_place_to_id: str = "0",
+    ) -> List[Dict[str, str]]:
+        """
+        Implements parseTextData API — attempt to parse free-text strings as transaction records
+        using the server-side rules configured in the user's account.
+
+        The server applies the user's text-parsing rules (e.g. SMS templates, keyword rules) to
+        each string in ``texts`` and returns a list of partially-filled record dicts.  The exact
+        set of keys in the returned dicts depends on how well each string matched a rule and is
+        not specified further in the WSDL.  The caller must treat the result as advisory data and
+        validate / fill in missing fields before calling :meth:`set_record_list`.
+
+        Args:
+            texts: List of UTF-8 strings to parse (e.g. raw SMS or push notification text).
+                The server treats the list as a 0-based indexed array.
+            default_place_from_id: Account ID to use when no rule matches (``"0"`` = no default).
+            default_cat_id: Expense category ID to use when no rule matches.
+            default_src_id: Income source ID to use when no rule matches.
+            default_place_to_id: Destination account ID for transfers when no rule matches.
+
+        Returns:
+            List of raw ``{field: value}`` dicts as returned by the server.  Each dict
+            corresponds to the input string at the same index.  The server may return an empty
+            dict for a string it could not parse.
+
+        Note:
+            The exact response field set is undocumented and may vary per user account
+            configuration.  If you need a fully-typed result, inspect the raw dicts returned
+            here and map them to :class:`~drebedengi.model.Transaction` fields manually.
+
+        Original WSDL description:
+            Try to parse text data as records; [def..] default field values if no rules
+            detected; [list] => array (indexes must be 0,1,2...N) of strings to parse (UTF8);
+            Returns the array of array - data for records;
+        """
+
+        logger.debug(f"Parsing text data: {len(texts)} strings")
+
+        list_xml = generate_xml_array(texts)
+
+        with self.client.settings(raw_response=True, strict=False):
+            result = self.client.service.parseTextData(
+                self.api_key,
+                self.login,
+                self.password,
+                defPlaceFromId=default_place_from_id,
+                defCatId=default_cat_id,
+                defSrcId=default_src_id,
+                defPlaceToId=default_place_to_id,
+                list=list_xml,
+            )
+            DrebedengiAPIError.check_and_raise(result)
+
+        root = etree.fromstring(result.content)
+        items: List[etree.Element] = root.findall(".//parseTextDataReturn/item")
+
+        return [xmlmap_to_dict(item) for item in items]
+
+    def parse_push_data(
+        self,
+        texts: List[str],
+    ) -> List[Dict[str, str]]:
+        """
+        Implements parsePushData API — attempt to parse push notification strings as transaction
+        records using the server-side rules configured in the user's account.
+
+        Functionally similar to :meth:`parse_text_data`, but designed specifically for push
+        notification payloads (e.g. bank SMS/push text in the format the mobile app receives).
+        Unlike :meth:`parse_text_data`, there are no ``def*`` default parameters — the server
+        infers defaults from the push content itself.
+
+        Args:
+            texts: List of UTF-8 push notification strings to parse.  Indexed 0-based.
+
+        Returns:
+            List of raw ``{field: value}`` dicts as returned by the server.  Each dict
+            corresponds to the input string at the same index.
+
+        Note:
+            The exact response field set is undocumented (same caveat as
+            :meth:`parse_text_data`).
+
+        Original WSDL description:
+            Try to parse text data as records; [def..] default field values if no rules
+            detected; [list] => array (indexes must be 0,1,2...N) of strings to parse (UTF8);
+            Returns the array of array - data for records;
+        """
+
+        logger.debug(f"Parsing push data: {len(texts)} strings")
+
+        list_xml = generate_xml_array(texts)
+
+        with self.client.settings(raw_response=True, strict=False):
+            result = self.client.service.parsePushData(
+                self.api_key,
+                self.login,
+                self.password,
+                list=list_xml,
+            )
+            DrebedengiAPIError.check_and_raise(result)
+
+        root = etree.fromstring(result.content)
+        items: List[etree.Element] = root.findall(".//parsePushDataReturn/item")
+
+        return [xmlmap_to_dict(item) for item in items]
