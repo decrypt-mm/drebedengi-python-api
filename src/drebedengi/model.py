@@ -130,7 +130,7 @@ class Transaction:
     operation_type: TransactionType = field(converter=_transaction_type_from_str)
     account_id: int = field(converter=int, metadata={"xml": {"name": "place_id"}})
     amount: int = field(converter=int, metadata={"xml": {"name": "sum"}})
-    comment: str | None = field(converter=str, default=None)
+    comment: str | None = field(converter=optional(str), default=None)
     oper_utc_timestamp: datetime | None = field(
         converter=optional(_xml_timestamp_to_datetime),
         metadata={"xml": {"name": "oper_timestamp"}},

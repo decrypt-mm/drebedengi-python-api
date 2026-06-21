@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime
 
 import zeep
@@ -32,6 +33,29 @@ DeletableObjectType = Literal[
 
 logger = logging.getLogger(__name__)
 
+# Patterns that identify credential/PII values in log messages and SOAP body text.
+# Each pattern targets a key=value or XML-element form.  Replacements use '***'.
+_REDACT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # SOAP XML elements: <login>value</login>, <password>…</password>, <apiKey>…</apiKey>
+    (re.compile(r"(<(?:login|password|api[_-]?key)>)[^<]*(</)", re.IGNORECASE), r"\1***\2"),
+    # f-string debug forms: login='value', password='value', api_key='value'
+    (re.compile(r"((?:login|password|api[_-]?key)=')[^']*(')", re.IGNORECASE), r"\1***\2"),
+    # f-string debug forms without quotes: login=value (word boundary)
+    (re.compile(r"((?:login|password|api[_-]?key)=)\S+", re.IGNORECASE), r"\1***"),
+]
+
+
+def _redact(text: str) -> str:
+    """Mask credential/PII substrings in *text* before writing to logs or exceptions.
+
+    Applies a set of regex replacements targeting api_key/login/password in both
+    SOAP XML form and Python f-string debug form.  Does not alter structure — only
+    replaces the value portion with ``***``.
+    """
+    for pattern, replacement in _REDACT_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
 DREBEDENGI_DEFAULT_SOAP_URL = "https://www.drebedengi.ru/soap/dd.wsdl"
 DREBEDENGI_DEFAULT_TIMEOUTS = (60, 300)
 
@@ -54,7 +78,7 @@ class DrebedengiAPIError(Exception):
         Check if response is an API error and immediatelly raise it.
         """
         if not response.ok:
-            raise cls("Network error", response.status_code, response.text)
+            raise cls("Network error", response.status_code, _redact(response.text))
 
         root = etree.fromstring(response.content)
         fault = root.find(".//{http://schemas.xmlsoap.org/soap/envelope/}Fault")
@@ -62,7 +86,7 @@ class DrebedengiAPIError(Exception):
             raise cls(
                 fault.findtext(".//faultstring"),
                 response.status_code,
-                response.text,
+                _redact(response.text),
                 fault.findtext(".//faultcode"),
             )
 
@@ -101,7 +125,9 @@ class DrebedengiAPI:
         self.client = Client(soap_url, transport=transport)  # type: ignore
 
         logger.debug(
-            f"Initialized DrebedengiAPI for {login=}. SOAP URL: {self.soap_url}. Strict: {self.strict}"
+            _redact(
+                f"Initialized DrebedengiAPI for {login=}. SOAP URL: {self.soap_url}. Strict: {self.strict}"
+            )
         )
 
     def get_transactions(
@@ -175,7 +201,18 @@ class DrebedengiAPI:
 
         pdict["relative_date"] = relative_date.strftime("%Y-%m-%d")
 
-        if period_from and period_to:
+        if (period_from is None) != (period_to is None):
+            # Exactly one of the two boundaries was supplied — this is almost certainly a
+            # caller bug: the server would silently ignore the partial specification and fall
+            # back to report_period, producing a misleadingly wrong result.
+            missing = "period_to" if period_to is None else "period_from"
+            provided = "period_from" if period_to is None else "period_to"
+            raise ValueError(
+                f"Both period_from and period_to must be supplied together, "
+                f"or both must be None. Got {provided} but {missing} is missing."
+            )
+
+        if period_from is not None and period_to is not None:
             pdict["period_from"] = period_from.strftime("%Y-%m-%d")
             pdict["period_to"] = period_to.strftime("%Y-%m-%d")
             pdict["r_period"] = int(ReportPeriod.CUSTOM_PERIOD)
@@ -694,7 +731,15 @@ class DrebedengiAPI:
 
         root = etree.fromstring(result.content)
 
-        return int(root.findtext(".//getCurrentRevisionReturn"))
+        revision_text = root.findtext(".//getCurrentRevisionReturn")
+        if revision_text is None:
+            raise ValueError("getCurrentRevisionReturn element missing from server response")
+        try:
+            return int(revision_text)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"getCurrentRevisionReturn is not an integer: {revision_text!r}"
+            ) from exc
 
     def parse_text_data(
         self,
