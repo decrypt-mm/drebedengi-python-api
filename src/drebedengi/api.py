@@ -344,6 +344,61 @@ class DrebedengiAPI:
 
         return [xmlmap_to_model(item, ChangeRecord, strict=self.strict) for item in items]
 
+    def set_category_list(self, categories: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """
+        Implements setCategoryList API — insert or update expense categories in bulk.
+
+        Each category record is a dict with one of the ID keys:
+
+            - ``client_id`` (int): a local ID — *insert* a new category;
+              the server echoes this id back alongside the assigned ``server_id``
+            - ``server_id`` (int) or ``id`` (int): existing category ID — *update*
+
+        Other fields:
+
+            - ``parent_id`` (int): parent category ID; ``-1`` for root-level categories
+            - ``type`` (int): object type; always ``3`` for expense categories
+            - ``name`` (str): category name (UTF-8)
+            - ``is_hidden`` (bool): **must** be a Python ``bool`` — passing ``0`` or ``"f"``
+              causes the server to return error 48 ("not a boolean")
+            - ``is_for_duty`` (bool): **must** be a Python ``bool``; required on SET even though
+              GET does not return this field
+            - ``sort`` (int): sort order within the tree level
+            - ``description`` (str, optional): free-text description
+
+        Returns the array of ``{server_id, client_id, status}`` maps that the server sent back
+        (same shape as :meth:`set_record_list`).  For inserts, ``client_id`` echoes what you
+        passed in; for updates, ``server_id`` echoes what you passed in.
+
+        Original WSDL description:
+            Insert or update waste category list; [list] => array of arrays: 'server_id' or
+            'client_id' [int8] - server or client ID of the record# If client ID is present - try
+            to insert new record, and return server2client correspondence in the result array# If
+            server_id is present - try to update existing record, @see getCategoryList description
+            for other detail; Returns the array of server IDs, successfully changed; The client
+            MUST save server IDs corresponded to client IDs, for subsequent 'update' and 'delete'
+            calls;
+        """
+        if not categories:
+            return []
+
+        list_xml = generate_xml_map_array(
+            [zeep.helpers.create_xml_soap_map(r) for r in categories]  # type: ignore
+        )
+
+        with self.client.settings(raw_response=True, strict=False):
+            result = self.client.service.setCategoryList(
+                self.api_key,
+                self.login,
+                self.password,
+                list=list_xml,
+            )
+            DrebedengiAPIError.check_and_raise(result)
+
+        root = etree.fromstring(result.content)
+        items: List[etree.Element] = root.findall(".//setCategoryListReturn/item")
+        return [xmlmap_to_dict(item) for item in items]
+
     def get_expense_categories(
         self,
         *,
